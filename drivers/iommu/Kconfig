@@ -41,9 +41,6 @@ config IOMMU_IO_PGTABLE_LPAE_SELFTEST
 
 endmenu
 
-config IOMMU_IOVA
-	bool
-
 config OF_IOMMU
        def_bool y
        depends on OF && IOMMU_API
@@ -125,8 +122,8 @@ config INTEL_IOMMU
 	bool "Support for Intel IOMMU using DMA Remapping Devices"
 	depends on PCI_MSI && ACPI && (X86 || IA64_GENERIC)
 	select IOMMU_API
-	select IOMMU_IOVA
 	select DMAR_TABLE
+	select IOVA
 	help
 	  DMA remapping (DMAR) devices support enables independent address
 	  translations for Direct Memory Access (DMA) from devices.
