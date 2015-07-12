@@ -102,9 +102,12 @@ void scif_cleanup_zombie_epd(void)
 	spin_lock(&scif_info.eplock);
 	list_for_each_safe(pos, tmpq, &scif_info.zombie) {
 		ep = list_entry(pos, struct scif_endpt, list);
-		list_del(pos);
-		scif_info.nr_zombies--;
-		kfree(ep);
+		if (scif_rma_ep_can_uninit(ep)) {
+			list_del(pos);
+			scif_info.nr_zombies--;
+			put_iova_domain(&ep->rma_info.iovad);
+			kfree(ep);
+		}
 	}
 	spin_unlock(&scif_info.eplock);
 }
