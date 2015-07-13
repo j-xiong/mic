@@ -193,8 +193,16 @@ static void mic_dma_prog_intr(struct mic_dma_chan *ch)
 static int mic_dma_do_dma(struct mic_dma_chan *ch, int flags, dma_addr_t src,
 			  dma_addr_t dst, size_t len)
 {
-	if (-ENOMEM == mic_dma_prog_memcpy_desc(ch, src, dst, len))
+	if (len && -ENOMEM == mic_dma_prog_memcpy_desc(ch, src, dst, len)) {
 		return -ENOMEM;
+	} else {
+		/* 3 is the maximum number of status descriptors */
+		int ret = mic_dma_avail_desc_ring_space(ch, 3);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	/* Above mic_dma_prog_memcpy_desc() makes sure we have enough space */
 	if (flags & DMA_PREP_FENCE) {
 		mic_dma_prep_status_desc(&ch->desc_ring[ch->head], 0,
@@ -206,6 +214,21 @@ static int mic_dma_do_dma(struct mic_dma_chan *ch, int flags, dma_addr_t src,
 		mic_dma_prog_intr(ch);
 
 	return 0;
+}
+
+/* Program a status descriptor with phys as address and value to be written */
+static int mic_dma_do_status_update(struct mic_dma_chan *ch, dma_addr_t phys,
+				    u64 value)
+{
+	int ret = mic_dma_avail_desc_ring_space(ch, 4);
+
+	if (ret < 0)
+		return ret;
+	ret = 0;
+	mic_dma_prep_status_desc(&ch->desc_ring[ch->head],
+				 value, phys, false);
+	mic_dma_hw_ring_inc_head(ch);
+	return ret;
 }
 
 static inline void mic_dma_issue_pending(struct dma_chan *ch)
@@ -287,9 +310,28 @@ mic_dma_prep_memcpy_lock(struct dma_chan *ch, dma_addr_t dma_dest,
 		return NULL;
 
 	spin_lock(&mic_ch->prep_lock);
+	if (len == 8) {
+		/*
+		 * This is a hack to program status descriptor since
+		 * DMA engine API doesn't have support for this.
+		 */
+		result = mic_dma_do_status_update(mic_ch, dma_dest, dma_src);
+		if (result)
+			goto error;
+
+		result = mic_dma_do_dma(mic_ch, DMA_PREP_FENCE, 0, 0, 0);
+		if (result < 0)
+			goto error;
+		result = mic_dma_do_dma(mic_ch, flags, 0, 0, 0);
+		if (result < 0)
+			goto error;
+		return allocate_tx(mic_ch);
+	}
+
 	result = mic_dma_do_dma(mic_ch, flags, dma_src, dma_dest, len);
 	if (result >= 0)
 		return allocate_tx(mic_ch);
+error:
 	dev_err(dev, "Error enqueueing dma, error=%d\n", result);
 	spin_unlock(&mic_ch->prep_lock);
 	return NULL;
